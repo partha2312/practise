@@ -34,17 +34,17 @@ func (p productsWithRating) CompareTo(q priorityqueue.PriorityQueue) bool {
 }
 
 func (r *rulesEngine) Filter(products []*models.Product, recos map[string]float64) ([]*models.Product, error) {
-	filteredProducts := r.ruleZero(products, recos)
+	filteredProducts := r.preprocess(products, recos)
 	if r.rulesEngineEnabled[0] {
-		r.ruleOne(filteredProducts, r.numberOfProducts-len(filteredProducts.products))
+		r.productsWithHighestRatingByType(filteredProducts, r.numberOfProducts-len(filteredProducts.products))
 	}
 	if r.rulesEngineEnabled[1] {
-		r.ruleTwo(filteredProducts, r.numberOfProducts-len(filteredProducts.products))
+		r.productsWithHighestRating(filteredProducts, r.numberOfProducts-len(filteredProducts.products))
 	}
 	return filteredProducts.products, nil
 }
 
-func (r *rulesEngine) ruleZero(products []*models.Product, recos map[string]float64) *filteredProducts {
+func (r *rulesEngine) preprocess(products []*models.Product, recos map[string]float64) *filteredProducts {
 	filteredProducts := &filteredProducts{}
 	remaining := priorityqueue.NewPriorityQueue()
 	productByType := make(map[string]*priorityqueue.Queue)
@@ -62,22 +62,26 @@ func (r *rulesEngine) ruleZero(products []*models.Product, recos map[string]floa
 	return filteredProducts
 }
 
-func (r *rulesEngine) ruleOne(filteredProducts *filteredProducts, toChoose int) {
+func (r *rulesEngine) productsWithHighestRatingByType(filteredProducts *filteredProducts, toChoose int) {
+	remaining := priorityqueue.NewPriorityQueue()
 	for _, product := range filteredProducts.productByType {
 		if topProduct, err := product.Pop(); err == nil {
 			prod := topProduct.(productsWithRating).product
 			filteredProducts.products = append(filteredProducts.products, prod)
 			for product.Length() > 0 {
 				if topProduct, err := product.Pop(); err == nil {
-					filteredProducts.remaining.Push(topProduct)
+					remaining.Push(topProduct)
 				}
 			}
 		}
-		toChoose--
+		if toChoose--; toChoose <= 0 {
+			break
+		}
 	}
+	filteredProducts.remaining = remaining
 }
 
-func (r *rulesEngine) ruleTwo(filteredProducts *filteredProducts, toChoose int) {
+func (r *rulesEngine) productsWithHighestRating(filteredProducts *filteredProducts, toChoose int) {
 	for filteredProducts.remaining.Length() > 0 && toChoose > 0 {
 		if topProduct, err := filteredProducts.remaining.Pop(); err == nil {
 			prod := topProduct.(productsWithRating).product

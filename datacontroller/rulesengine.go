@@ -23,11 +23,29 @@ type productsWithRating struct {
 	rating  float64
 }
 
+type filteredProducts struct {
+	products      []*models.Product
+	productByType map[string]*priorityqueue.Queue
+	remaining     *priorityqueue.Queue
+}
+
 func (p productsWithRating) CompareTo(q priorityqueue.PriorityQueue) bool {
 	return p.rating > q.(productsWithRating).rating
 }
 
-func (r *rulesEngine) ruleZero(products []*models.Product, recos map[string]float64) (map[string]*priorityqueue.Queue, *priorityqueue.Queue) {
+func (r *rulesEngine) Filter(products []*models.Product, recos map[string]float64) ([]*models.Product, error) {
+	filteredProducts := r.preprocess(products, recos)
+	if r.rulesEngineEnabled[0] {
+		r.productsWithHighestRatingByType(filteredProducts, r.numberOfProducts-len(filteredProducts.products))
+	}
+	if r.rulesEngineEnabled[1] {
+		r.productsWithHighestRating(filteredProducts, r.numberOfProducts-len(filteredProducts.products))
+	}
+	return filteredProducts.products, nil
+}
+
+func (r *rulesEngine) preprocess(products []*models.Product, recos map[string]float64) *filteredProducts {
+	filteredProducts := &filteredProducts{}
 	remaining := priorityqueue.NewPriorityQueue()
 	productByType := make(map[string]*priorityqueue.Queue)
 	for _, product := range products {
@@ -39,54 +57,36 @@ func (r *rulesEngine) ruleZero(products []*models.Product, recos map[string]floa
 		productByType[t].Push(prodWithRating)
 		remaining.Push(prodWithRating)
 	}
-	return productByType, remaining
+	filteredProducts.productByType = productByType
+	filteredProducts.remaining = remaining
+	return filteredProducts
 }
 
-func (r *rulesEngine) ruleOne(productByType map[string]*priorityqueue.Queue) ([]*models.Product, *priorityqueue.Queue) {
-	filteredProducts := []*models.Product{}
+func (r *rulesEngine) productsWithHighestRatingByType(filteredProducts *filteredProducts, toChoose int) {
 	remaining := priorityqueue.NewPriorityQueue()
-	for _, product := range productByType {
+	for _, product := range filteredProducts.productByType {
 		if topProduct, err := product.Pop(); err == nil {
 			prod := topProduct.(productsWithRating).product
-			filteredProducts = append(filteredProducts, prod)
+			filteredProducts.products = append(filteredProducts.products, prod)
 			for product.Length() > 0 {
 				if topProduct, err := product.Pop(); err == nil {
 					remaining.Push(topProduct)
 				}
 			}
 		}
+		if toChoose--; toChoose <= 0 {
+			break
+		}
 	}
-	return filteredProducts, remaining
+	filteredProducts.remaining = remaining
 }
 
-func (r *rulesEngine) ruleTwo(products *priorityqueue.Queue, toChoose int) ([]*models.Product, *priorityqueue.Queue) {
-	filteredProducts := []*models.Product{}
-	for products.Length() > 0 && toChoose > 0 {
-		if topProduct, err := products.Pop(); err == nil {
+func (r *rulesEngine) productsWithHighestRating(filteredProducts *filteredProducts, toChoose int) {
+	for filteredProducts.remaining.Length() > 0 && toChoose > 0 {
+		if topProduct, err := filteredProducts.remaining.Pop(); err == nil {
 			prod := topProduct.(productsWithRating).product
-			filteredProducts = append(filteredProducts, prod)
+			filteredProducts.products = append(filteredProducts.products, prod)
 			toChoose--
 		}
 	}
-	return filteredProducts, products
-}
-
-func (r *rulesEngine) Filter(products []*models.Product, recos map[string]float64) ([]*models.Product, error) {
-	filteredProducts := []*models.Product{}
-	ruleZeroProducts, remaining := r.ruleZero(products, recos)
-	ruleOneProducts := []*models.Product{}
-	ruleTwoProducts := []*models.Product{}
-	if r.rulesEngineEnabled[0] {
-		ruleOneProducts, remaining = r.ruleOne(ruleZeroProducts)
-	}
-	if r.rulesEngineEnabled[1] {
-		ruleTwoProducts, remaining = r.ruleTwo(remaining, r.numberOfProducts-len(ruleOneProducts))
-	}
-	for _, p := range ruleOneProducts {
-		filteredProducts = append(filteredProducts, p)
-	}
-	for _, p := range ruleTwoProducts {
-		filteredProducts = append(filteredProducts, p)
-	}
-	return filteredProducts, nil
 }
